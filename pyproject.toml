@@ -1,0 +1,53 @@
+[project]
+name = "gazekey"
+version = "0.1.0"
+description = "Webcam eye tracking and a hands-free dwell keyboard, with honest measurement."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy>=1.26,<2",
+    # MediaPipe depends on opencv-contrib-python; installing plain opencv-python next to it
+    # makes the two overwrite each other's files, so depend on the contrib build directly.
+    "opencv-contrib-python>=4.9,<4.12",
+    # Pinned: 0.10.21 is the newest release with explicit cp311 macOS wheels (universal2).
+    "mediapipe==0.10.21",
+    "PySide6>=6.7",  # calibration UI and (Phase 4) keyboard; handles Retina points vs pixels
+]
+
+[project.scripts]
+gazekey = "gazekey.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gazekey"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests", "scripts"]
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+module = ["mediapipe", "mediapipe.*", "cv2"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
