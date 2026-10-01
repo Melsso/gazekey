@@ -17,7 +17,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check . --no-cache
       - run: uv run mypy .
-      # - run: uv run pytest
+      - run: uv run pytest
 
   arm64-smoke:
     runs-on: macos-14
