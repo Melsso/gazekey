@@ -73,27 +73,6 @@ def radial_sd_deg(screen: ScreenGeometry, points_px: ArrayLike) -> float:
     return float(np.sqrt(np.sum(d**2) / (len(pts) - 1)))
 
 
-class RateMeter:
-    def __init__(self, alpha: float = 0.1) -> None:
-        if not 0.0 < alpha <= 1.0:
-            raise ValueError("alpha must be in (0, 1]")
-        self._alpha = alpha
-        self._last_ns: int | None = None
-        self._rate: float | None = None
-
-    def update(self, t_ns: int) -> float | None:
-        last, self._last_ns = self._last_ns, t_ns
-        if last is None or t_ns <= last:
-            return self._rate
-        inst = 1e9 / (t_ns - last)
-        self._rate = inst if self._rate is None else self._rate + self._alpha * (inst - self._rate)
-        return self._rate
-
-    @property
-    def rate(self) -> float | None:
-        return self._rate
-
-
 def summarise_ms(values_ms: Sequence[float]) -> str:
     if len(values_ms) == 0:
         return "no data"

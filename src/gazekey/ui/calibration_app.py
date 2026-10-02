@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -38,6 +38,12 @@ CENTER = QColor(255, 70, 70)
 
 class CalibrationError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class CalibrationRun:
+    session: Session
+    origin_pt: tuple[int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +118,8 @@ class CalibrationWindow(QWidget):
         info: ScreenInfo,
         distance_mm: float,
         seed: int,
+        n_calibration: int = 9,
+        n_validation: int = 16,
         clock_ns: Callable[[], int] = time.monotonic_ns,
         tick_ms: int = 10,
     ) -> None:
@@ -122,7 +130,10 @@ class CalibrationWindow(QWidget):
         self._info = info
         self._distance_mm = distance_mm
         self._seed = seed
+        self._n_calibration = n_calibration
+        self._n_validation = n_validation
         self._clock_ns = clock_ns
+        self.origin_pt: tuple[int, int] = (0, 0)
         self.outcome: Outcome = "running"
         self.error = ""
         self.screen_geometry: ScreenGeometry | None = None
@@ -165,7 +176,17 @@ class CalibrationWindow(QWidget):
             return
         w, h = self.width(), self.height()
         self.screen_geometry = self._info.geometry(w, h, self._distance_mm)
-        self._controller.start(self._clock_ns(), build_schedule(w, h, seed=self._seed))
+
+        origin = self.mapToGlobal(QPoint(0, 0))
+        self.origin_pt = (origin.x(), origin.y())
+        schedule = build_schedule(
+            w,
+            h,
+            seed=self._seed,
+            n_calibration=self._n_calibration,
+            n_validation=self._n_validation,
+        )
+        self._controller.start(self._clock_ns(), schedule)
 
     def _finish(self, outcome: Outcome, error: str = "") -> None:
         self._timer.stop()
@@ -198,6 +219,7 @@ class CalibrationWindow(QWidget):
 
     def _paint_intro(self, painter: QPainter) -> None:
         c = self._controller
+        n = self._n_calibration + self._n_validation
         if not c.camera_ready:
             status, color = "waiting for camera frames...", WARN
         elif not c.face_visible:
@@ -209,7 +231,8 @@ class CalibrationWindow(QWidget):
             [
                 "gazekey calibration",
                 "Sit at your normal distance. Look at each dot until it disappears.",
-                "25 dots, about 50 seconds. Do not chase dots before they appear.",
+                f"{n} dots, about {round(n * DEFAULT_TIMING.total_s + 1.5)} seconds. "
+                "Do not chase dots before they appear.",
                 status,
                 "Space: start     Esc: abort",
             ],
@@ -236,12 +259,14 @@ def run_calibration(
     camera_index: int | None,
     distance_mm: float,
     seed: int,
+    n_calibration: int = 9,
+    n_validation: int = 16,
     screen_mm_override: tuple[float, float] | None = None,
     report: Callable[[str], None] = print,
     frame_stream: FrameStream | None = None,
     clock_ns: Callable[[], int] = time.monotonic_ns,
     timing: DotTiming = DEFAULT_TIMING,
-) -> Session | None:
+) -> CalibrationRun | None:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     screen = QGuiApplication.primaryScreen()
     if screen is None:
@@ -272,6 +297,8 @@ def run_calibration(
             info=info,
             distance_mm=distance_mm,
             seed=seed,
+            n_calibration=n_calibration,
+            n_validation=n_validation,
             clock_ns=clock_ns,
         )
         worker.start()
@@ -288,4 +315,5 @@ def run_calibration(
         raise CalibrationError(window.error)
     if window.outcome != "done" or window.screen_geometry is None:
         return None
-    return controller.build_session(conditions, window.screen_geometry)
+    session = controller.build_session(conditions, window.screen_geometry)
+    return CalibrationRun(session, window.origin_pt)

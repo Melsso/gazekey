@@ -20,45 +20,31 @@ def test_help_and_version_exit_cleanly(capsys: pytest.CaptureFixture[str]) -> No
     assert "gazekey" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("argv", [["type"], ["study"]])
-def test_future_phase_commands_are_stubs(
-    argv: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert main(argv) == 2
-    assert "not implemented yet" in capsys.readouterr().err
-
-
-def test_short_flags_parse() -> None:
+def test_commands_and_flags_parse() -> None:
     parser = build_parser()
-    a = parser.parse_args(["preview", "-c", "1", "-l", "m.task", "-r", "out.npz", "-s", "5"])
-    assert (a.camera, a.landmarker) == (1, Path("m.task"))
-    assert (a.record, a.seconds) == (Path("out.npz"), 5.0)
-    assert parser.parse_args(["doctor", "-c", "0", "-l", "m.task"]).camera == 0
-    c = parser.parse_args(
-        ["calibrate", "-d", "60", "-o", "s.npz", "-p", "p2", "-H", "still", "-g", "-L", "dim"]
-        + ["-t", "5", "-e", "3", "-S", "286x179", "-c", "1", "-l", "m.task"]
-    )
-    assert (c.distance_cm, c.output, c.participant) == (60.0, Path("s.npz"), "p2")
-    assert (c.head, c.glasses, c.light, c.minutes, c.seed) == ("still", True, "dim", 5.0, 3)
-    assert (c.screen_mm, c.camera, c.landmarker) == ("286x179", 1, Path("m.task"))
-    e = parser.parse_args(["eval", "a.npz", "b.npz", "-m", "poly2", "-f", "iris+pose"])
-    assert e.files == [Path("a.npz"), Path("b.npz")]
-    assert (e.model, e.features) == ("poly2", "iris+pose")
-    assert parser.parse_args(["inspect", "x.npz", "-w", "1"]).window == 1.0
-    assert parser.parse_args(["type", "-d", "600"]).dwell_ms == 600
-    assert parser.parse_args(["study", "-u", "hierarchical"]).ui == "hierarchical"
-    with pytest.raises(SystemExit):
-        parser.parse_args(["study", "-u", "bogus"])
-    with pytest.raises(SystemExit):
-        parser.parse_args(["calibrate"])
-    with pytest.raises(SystemExit):
-        parser.parse_args(["eval", "a.npz", "-m", "svm"])
+    c = parser.parse_args(["calibrate"])
+    assert (c.distance_cm, c.participant, c.note) == (60.0, "me", "")
+    c = parser.parse_args(["calibrate", "-d", "70", "-p", "ann", "-m", "glasses"])
+    assert (c.distance_cm, c.participant, c.note) == (70.0, "ann", "glasses")
+    assert parser.parse_args(["eval"]).files == []
+    assert parser.parse_args(["eval", "a.npz", "b.npz"]).files == [Path("a.npz"), Path("b.npz")]
+    assert parser.parse_args(["doctor"]).command == "doctor"
+    assert parser.parse_args(["track"]).command == "track"
 
 
-def test_calibrate_rejects_bad_screen_size() -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["calibrate", "-d", "60", "-S", "wide"])
-    assert exc.value.code == 2
+def test_removed_commands_and_flags_are_gone() -> None:
+    parser = build_parser()
+    for argv in (["preview"], ["inspect", "x.npz"], ["type"], ["study"], ["calibrate", "-n", "13"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+
+
+def test_eval_without_sessions_explains_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["eval"]) == 1
+    assert "no sessions found" in capsys.readouterr().err
 
 
 def test_config_env_lookups() -> None:

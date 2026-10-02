@@ -3,14 +3,22 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 
+from . import F64
+from .features import DEFAULT_OPEN_THRESHOLD, features_from_normalized
 from .geometry import ScreenGeometry
 from .landmarks import LandmarkFrame
+from .mapper import RidgeMapper, feature_columns, make_mapper, usable_mask
 from .session import Conditions, DotRole, Session, SessionRecorder
 
-CALIBRATION_FRACTIONS = (0.1, 0.5, 0.9)
 Point = tuple[float, float]
 Phase = Literal["waiting", "lead_in", "dot", "done", "aborted"]
+CALIBRATION_FRACTIONS = (0.1, 0.5, 0.9)
+EXTRA_FRACTIONS = ((0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7))
+FIVE_POINT = (0, 2, 4, 6, 8)
+CALIBRATION_SIZES = (5, 9, 13)
+MIN_CALIBRATION_DOTS = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +47,11 @@ def calibration_points(width: float, height: float) -> list[Point]:
         columns = CALIBRATION_FRACTIONS if row % 2 == 0 else CALIBRATION_FRACTIONS[::-1]
         points.extend((fx * width, fy * height) for fx in columns)
     return points
+
+
+def extra_calibration_points(width: float, height: float) -> list[Point]:
+    """The 4 inner points (at 30/70 %) that turn the 9-point grid into the 13-point variant."""
+    return [(fx * width, fy * height) for fx, fy in EXTRA_FRACTIONS]
 
 
 def validation_points(
@@ -80,11 +93,29 @@ def validation_points(
 
 
 def build_schedule(
-    width: float, height: float, *, seed: int = 0, n_validation: int = 16
+    width: float,
+    height: float,
+    *,
+    seed: int = 0,
+    n_validation: int = 16,
+    n_calibration: int = 9,
 ) -> list[DotPlan]:
+    """9 grid dots ("cal"), optionally 4 inner ones ("ext", when n_calibration is 13), then
+    `n_validation` validation dots that avoid every calibration point."""
+    if n_calibration not in (9, 13):
+        raise ValueError("n_calibration must be 9 or 13")
     cal = calibration_points(width, height)
-    val = validation_points(width, height, cal, n=n_validation, seed=seed)
-    return [DotPlan(p, "cal") for p in cal] + [DotPlan(p, "val") for p in val]
+    ext = extra_calibration_points(width, height) if n_calibration == 13 else []
+    val = (
+        validation_points(width, height, cal + ext, n=n_validation, seed=seed)
+        if n_validation
+        else []
+    )
+    return (
+        [DotPlan(p, "cal") for p in cal]
+        + [DotPlan(p, "ext") for p in ext]
+        + [DotPlan(p, "val") for p in val]
+    )
 
 
 def analysis_window(session: Session, dot_index: int, timing: DotTiming) -> slice:
@@ -175,3 +206,71 @@ class CalibrationController:
     def _end_dot(self, t_ns: int) -> None:
         assert self._recorder is not None
         self._recorder.end_dot(t_ns)
+
+
+class FitError(RuntimeError):
+    pass
+
+
+def calibration_dot_indices(session: Session, points: int = 9) -> NDArray[np.intp]:
+    cal = session.dot_indices("cal")
+    if points == 9:
+        return cal
+    if points == 5:
+        if cal.size < 9:
+            raise ValueError("the 5-point variant needs the full 9-dot grid")
+        return cal[list(FIVE_POINT)]
+    if points == 13:
+        ext = session.dot_indices("ext")
+        if ext.size == 0:
+            raise ValueError("session has no extra calibration dots; record with `calibrate -n 13`")
+        return np.concatenate([cal, ext])
+    raise ValueError(f"calibration points must be one of {CALIBRATION_SIZES}")
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class CalibrationFit:
+    mapper: RidgeMapper
+    columns: list[int]
+    n_used: int
+    n_total: int
+    x: F64
+    y: F64
+
+
+def fit_calibration(
+    session: Session,
+    *,
+    mapper: str = "ridge",
+    feature_set: str = "iris",
+    calibration: int = 9,
+    timing: DotTiming = DEFAULT_TIMING,
+    open_threshold: float = DEFAULT_OPEN_THRESHOLD,
+    min_valid_frames: int = 5,
+    feats: F64 | None = None,
+    usable: NDArray[np.bool_] | None = None,
+) -> CalibrationFit:
+    columns = feature_columns(feature_set)
+    try:
+        dots = calibration_dot_indices(session, calibration)
+    except ValueError as exc:
+        raise FitError(str(exc)) from exc
+    if feats is None:
+        feats = features_from_normalized(session.landmarks, session.image_size, session.transforms)
+    if usable is None:
+        usable = usable_mask(feats, columns, open_threshold)
+
+    x_rows: list[F64] = []
+    y_rows: list[F64] = []
+    for i in dots:
+        sl = analysis_window(session, int(i), timing)
+        rows = feats[sl][usable[sl]][:, columns]
+        if len(rows) >= min_valid_frames:
+            x_rows.append(np.median(rows, axis=0))
+            y_rows.append(session.dot_positions_px[i])
+    if len(x_rows) < MIN_CALIBRATION_DOTS:
+        raise FitError(
+            f"only {len(x_rows)} usable calibration dots (need >= {MIN_CALIBRATION_DOTS})"
+        )
+    x, y = np.array(x_rows), np.array(y_rows)
+    return CalibrationFit(make_mapper(mapper).fit(x, y), columns, len(x_rows), int(dots.size), x, y)

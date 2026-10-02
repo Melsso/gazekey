@@ -106,7 +106,7 @@ def test_recorder_rejects_bad_usage() -> None:
     with pytest.raises(RuntimeError):
         rec.build()
     with pytest.raises(ValueError):
-        SessionRecorder(SIZE).begin_dot((1, 1), "xyz", 0) # type: ignore[arg-type]
+        SessionRecorder(SIZE).begin_dot((1, 1), "xyz", 0)  # type: ignore[arg-type]
 
 
 def test_session_validates_shapes_and_order() -> None:
@@ -164,3 +164,14 @@ def test_conditions_validation() -> None:
         Conditions(distance_cm=-5.0)
     with pytest.raises(ValueError):
         Conditions(minutes_since_calibration=-1.0)
+
+
+def test_extra_calibration_role_round_trips(tmp_path: Path) -> None:
+    rec = SessionRecorder(SIZE)
+    for role, t in (("cal", 0), ("ext", 1_000), ("val", 2_000)):
+        rec.begin_dot((10.0, 20.0), role, t)  # type: ignore[arg-type]
+        rec.add_frame(make_frame(t))
+        rec.end_dot(t + 500)
+    loaded = load_session(save_session(rec.build(), tmp_path / "s.npz"))
+    assert loaded.dot_roles.tolist() == ["cal", "ext", "val"]
+    assert loaded.dot_indices("ext").tolist() == [1]

@@ -41,15 +41,20 @@ class FakeClock:
 
 
 def make_window(
-    app: QCoreApplication,
-    worker: CaptureWorker | None = None,
+    app: QCoreApplication, worker: CaptureWorker | None = None
 ) -> tuple[CalibrationWindow, CalibrationController, FakeClock, "queue.SimpleQueue[LandmarkFrame]"]:
     clock = FakeClock()
     frames: queue.SimpleQueue[LandmarkFrame] = queue.SimpleQueue()
     controller = CalibrationController(FAST, lead_in_s=0.1)
     worker = worker or CaptureWorker(lambda stop: iter(()), frames)
     window = CalibrationWindow(
-        controller, frames, worker, info=INFO, distance_mm=600.0, seed=0, clock_ns=clock
+        controller,
+        frames,
+        worker,
+        info=INFO,
+        distance_mm=600.0,
+        seed=0,
+        clock_ns=clock,
     )
     window.resize(800, 600)
     window.show()

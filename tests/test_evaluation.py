@@ -111,3 +111,31 @@ def test_pooled_summary_combines_sessions_and_participants() -> None:
     assert pooled.size_cm(10.0) == pytest.approx(2 * 60 * np.tan(np.radians(5.0)), rel=1e-9)
     with pytest.raises(ValueError):
         summarise([])
+
+
+def test_calibration_point_variants_on_a_13_point_session() -> None:
+    session = synthetic_session(n_calibration=13)
+    for k in (5, 9, 13):
+        r = evaluate_session(session, calibration=k)
+        assert r.calibration_points == k
+        assert (r.n_cal_used, r.n_cal_total) == (k, k)
+        assert r.summary.mean_offset_deg < 0.05
+    assert evaluate_session(session).n_cal_total == 9
+
+
+def test_13_points_beat_5_points_under_noise_on_average() -> None:
+    def mean_error(k: int) -> float:
+        errors = []
+        for seed in range(6):
+            s = synthetic_session(n_calibration=13, noise=0.03, rng_seed=seed)
+            errors.append(evaluate_session(s, calibration=k).summary.mean_offset_deg)
+        return float(np.mean(errors))
+
+    assert mean_error(13) < mean_error(5)
+
+
+def test_13_point_variant_needs_extra_dots() -> None:
+    with pytest.raises(EvaluationError, match="extra calibration dots"):
+        evaluate_session(synthetic_session(), calibration=13)
+    with pytest.raises(EvaluationError, match="one of"):
+        evaluate_session(synthetic_session(), calibration=7)

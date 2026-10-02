@@ -4,10 +4,10 @@ from itertools import combinations_with_replacement
 from typing import Self
 
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 from . import F64
-from .features import feature_index
+from .features import feature_index, valid_mask
 
 IRIS = ("r_h", "l_h", "r_v_corner", "l_v_corner")
 POSE = ("yaw", "pitch", "roll", "tx", "ty", "tz")
@@ -29,6 +29,13 @@ def feature_columns(feature_set: str) -> list[int]:
             f"unknown feature set {feature_set!r}; choose from {list(FEATURE_SETS)}"
         ) from None
     return [feature_index(n) for n in names]
+
+
+def usable_mask(features: F64, columns: Sequence[int], open_threshold: float) -> NDArray[np.bool_]:
+    out: NDArray[np.bool_] = valid_mask(features, open_threshold) & np.isfinite(
+        features[:, list(columns)]
+    ).all(axis=1)
+    return out
 
 
 def polynomial_features(x: F64, degree: int) -> F64:

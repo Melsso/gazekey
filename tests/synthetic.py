@@ -105,7 +105,7 @@ def make_transform(
 TRUE_SCREEN = ScreenGeometry(1440, 900, 286.0, 179.0, 600.0)
 
 
-def gaze_features(x: float, y: float, screen: ScreenGeometry = TRUE_SCREEN) -> dict[str, float]:
+def gaze_features(x: float, y: float, screen: ScreenGeometry = TRUE_SCREEN) -> dict[str, Any]:
     u = x / screen.width_px - 0.5
     v = y / screen.height_px - 0.5
     return {
@@ -128,6 +128,8 @@ def synthetic_session(
     val_bias: float = 0.0,
     rng_seed: int = 1,
     timing: DotTiming = DEFAULT_TIMING,
+    n_calibration: int = 9,
+    n_validation: int = 16,
 ) -> Session:
     rng = np.random.default_rng(rng_seed)
     controller = CalibrationController(timing)
@@ -146,7 +148,14 @@ def synthetic_session(
 
     t = 1_000_000_000
     controller.on_frame(frame(t, centre, face=True, bias=0.0))
-    controller.start(t, build_schedule(screen.width_px, screen.height_px, seed=seed))
+    schedule = build_schedule(
+        screen.width_px,
+        screen.height_px,
+        seed=seed,
+        n_calibration=n_calibration,
+        n_validation=n_validation,
+    )
+    controller.start(t, schedule)
     prev, cur, seen = centre, centre, 0
     while controller.phase in ("lead_in", "dot"):
         t += step

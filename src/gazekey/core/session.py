@@ -14,8 +14,8 @@ from .geometry import ScreenGeometry
 from .landmarks import NUM_LANDMARKS, LandmarkFrame
 
 SCHEMA_VERSION = 1
-DotRole = Literal["cal", "val"]
-_DOT_ROLES = ("cal", "val")
+DotRole = Literal["cal", "ext", "val"]
+_DOT_ROLES = ("cal", "ext", "val")
 _HEADS = ("still", "free")
 _LIGHTS = ("normal", "dim")
 

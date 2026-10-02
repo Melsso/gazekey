@@ -4,10 +4,17 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import F64
-from .calibration import DEFAULT_TIMING, DotTiming, analysis_window
-from .features import DEFAULT_OPEN_THRESHOLD, features_from_normalized, valid_mask
+from .calibration import (
+    DEFAULT_TIMING,
+    DotTiming,
+    FitError,
+    analysis_window,
+    calibration_dot_indices,
+    fit_calibration,
+)
+from .features import DEFAULT_OPEN_THRESHOLD, features_from_normalized
 from .geometry import ScreenGeometry, size_mm_for_angle
-from .mapper import RidgeMapper, feature_columns, make_mapper
+from .mapper import RidgeMapper, feature_columns, usable_mask
 from .metrics import (
     chebyshev_deg,
     hit_rates,
@@ -17,8 +24,6 @@ from .metrics import (
     size_for_hit_rate,
 )
 from .session import Conditions, Session
-
-MIN_CALIBRATION_DOTS = 3
 
 
 class EvaluationError(RuntimeError):
@@ -59,6 +64,7 @@ class SessionResult:
     screen: ScreenGeometry
     mapper_name: str
     feature_set: str
+    calibration_points: int
     fitted: RidgeMapper
     n_cal_used: int
     n_cal_total: int
@@ -102,6 +108,7 @@ def evaluate_session(
     *,
     mapper: str = "ridge",
     feature_set: str = "iris",
+    calibration: int = 9,
     timing: DotTiming = DEFAULT_TIMING,
     open_threshold: float = DEFAULT_OPEN_THRESHOLD,
     min_valid_frames: int = 5,
@@ -109,14 +116,31 @@ def evaluate_session(
     screen = session.screen
     if screen is None:
         raise EvaluationError("session has no screen geometry (record it with `gazekey calibrate`)")
-    cal_dots, val_dots = session.dot_indices("cal"), session.dot_indices("val")
-    if cal_dots.size == 0 or val_dots.size == 0:
+    val_dots = session.dot_indices("val")
+    if session.dot_indices("cal").size == 0 or val_dots.size == 0:
         raise EvaluationError("session needs both calibration and validation dots")
 
     cols = feature_columns(feature_set)
     feats = features_from_normalized(session.landmarks, session.image_size, session.transforms)
-    usable = valid_mask(feats, open_threshold) & np.isfinite(feats[:, cols]).all(axis=1)
+    usable = usable_mask(feats, cols, open_threshold)
     face = session.face_found
+
+    try:
+        fit = fit_calibration(
+            session,
+            mapper=mapper,
+            feature_set=feature_set,
+            calibration=calibration,
+            timing=timing,
+            open_threshold=open_threshold,
+            min_valid_frames=min_valid_frames,
+            feats=feats,
+            usable=usable,
+        )
+        cal_dots = calibration_dot_indices(session, calibration)
+    except (FitError, ValueError) as exc:
+        raise EvaluationError(str(exc)) from exc
+    cal_offsets = screen.angular_distance_deg(fit.mapper.predict(fit.x), fit.y)
 
     n_frames = n_no_face = n_not_valid = 0
     for i in (*cal_dots, *val_dots):
@@ -124,21 +148,6 @@ def evaluate_session(
         n_frames += len(range(*sl.indices(session.n_frames)))
         n_no_face += int(np.count_nonzero(~face[sl]))
         n_not_valid += int(np.count_nonzero(~usable[sl]))
-
-    x_cal: list[F64] = []
-    y_cal: list[F64] = []
-    for i in cal_dots:
-        sl = analysis_window(session, int(i), timing)
-        rows = feats[sl][usable[sl]][:, cols]
-        if len(rows) >= min_valid_frames:
-            x_cal.append(np.median(rows, axis=0))
-            y_cal.append(session.dot_positions_px[i])
-    if len(x_cal) < MIN_CALIBRATION_DOTS:
-        raise EvaluationError(
-            f"only {len(x_cal)} usable calibration dots (need >= {MIN_CALIBRATION_DOTS})"
-        )
-    fitted = make_mapper(mapper).fit(np.array(x_cal), np.array(y_cal))
-    cal_offsets = screen.angular_distance_deg(fitted.predict(np.array(x_cal)), np.array(y_cal))
 
     offsets: list[float] = []
     cheb: list[F64] = []
@@ -149,7 +158,7 @@ def evaluate_session(
         idx = np.flatnonzero(usable[sl])
         if idx.size < min_valid_frames:
             continue
-        pred = fitted.predict(feats[sl][idx][:, cols])
+        pred = fit.mapper.predict(feats[sl][idx][:, cols])
         target = session.dot_positions_px[i]
         offsets.append(float(screen.angular_distance_deg(np.median(pred, axis=0), target)))
         cheb.append(chebyshev_deg(screen, pred, target))
@@ -163,9 +172,10 @@ def evaluate_session(
         screen=screen,
         mapper_name=mapper,
         feature_set=feature_set,
-        fitted=fitted,
-        n_cal_used=len(x_cal),
-        n_cal_total=int(cal_dots.size),
+        calibration_points=calibration,
+        fitted=fit.mapper,
+        n_cal_used=fit.n_used,
+        n_cal_total=fit.n_total,
         n_val_used=len(offsets),
         n_val_total=int(val_dots.size),
         cal_offsets_deg=np.asarray(cal_offsets, dtype=np.float64),

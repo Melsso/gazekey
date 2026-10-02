@@ -4,9 +4,13 @@ import pytest
 from gazekey.core.calibration import (
     CalibrationController,
     DotTiming,
+    FitError,
     analysis_window,
     build_schedule,
+    calibration_dot_indices,
     calibration_points,
+    extra_calibration_points,
+    fit_calibration,
     validation_points,
 )
 from gazekey.core.session import Conditions
@@ -157,3 +161,64 @@ def test_empty_schedule_rejected() -> None:
     c = make_ready_controller()
     with pytest.raises(ValueError):
         c.start(0, [])
+
+
+def test_extra_points_are_the_four_inner_quadrant_centres() -> None:
+    ext = extra_calibration_points(W, H)
+    assert sorted((round(x / W, 3), round(y / H, 3)) for x, y in ext) == [
+        (0.3, 0.3),
+        (0.3, 0.7),
+        (0.7, 0.3),
+        (0.7, 0.7),
+    ]
+
+
+def test_13_point_schedule_has_roles_and_validation_avoids_all_calibration_points() -> None:
+    plan = build_schedule(W, H, seed=2, n_calibration=13)
+    assert [p.role for p in plan] == ["cal"] * 9 + ["ext"] * 4 + ["val"] * 16
+    cal = np.array([p.position_px for p in plan if p.role != "val"])
+    val = np.array([p.position_px for p in plan if p.role == "val"])
+    d = np.hypot(val[:, None, 0] - cal[None, :, 0], val[:, None, 1] - cal[None, :, 1])
+    assert d.min() >= 0.05 * H
+
+
+def test_default_schedule_is_unchanged_by_the_new_options() -> None:
+    assert build_schedule(W, H, seed=3) == build_schedule(W, H, seed=3, n_calibration=9)
+    assert [p.role for p in build_schedule(W, H, n_validation=0)] == ["cal"] * 9
+    with pytest.raises(ValueError, match="9 or 13"):
+        build_schedule(W, H, n_calibration=5)
+
+
+def test_calibration_dot_indices_for_5_9_13() -> None:
+    session = synthetic_session(n_calibration=13)
+    nine = calibration_dot_indices(session, 9)
+    assert nine.tolist() == list(range(9))
+    five = calibration_dot_indices(session, 5)
+    fractions = {
+        (round(session.dot_positions_px[i][0] / W, 2), round(session.dot_positions_px[i][1] / H, 2))
+        for i in five
+    }
+    assert fractions == {(0.1, 0.1), (0.9, 0.1), (0.5, 0.5), (0.1, 0.9), (0.9, 0.9)}
+    thirteen = calibration_dot_indices(session, 13)
+    assert thirteen.tolist() == list(range(13))
+    with pytest.raises(ValueError, match="extra calibration dots"):
+        calibration_dot_indices(synthetic_session(), 13)
+    with pytest.raises(ValueError, match="one of"):
+        calibration_dot_indices(session, 7)
+
+
+def test_fit_calibration_uses_the_requested_dots() -> None:
+    session = synthetic_session(n_calibration=13)
+    for points, expected in ((5, 5), (9, 9), (13, 13)):
+        fit = fit_calibration(session, calibration=points)
+        assert (fit.n_used, fit.n_total) == (expected, expected)
+        assert fit.x.shape == (expected, 4) and fit.y.shape == (expected, 2)
+
+
+def test_fit_calibration_errors() -> None:
+    with pytest.raises(FitError, match="extra calibration dots"):
+        fit_calibration(synthetic_session(), calibration=13)
+    with pytest.raises(FitError, match="usable calibration dots"):
+        fit_calibration(synthetic_session(blink_dots=frozenset(range(8))))
+    with pytest.raises(ValueError, match="unknown feature set"):
+        fit_calibration(synthetic_session(), feature_set="bogus")

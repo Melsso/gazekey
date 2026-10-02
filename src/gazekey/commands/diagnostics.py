@@ -1,7 +1,6 @@
 import platform
 import sys
 import time
-import warnings
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -9,9 +8,6 @@ from pathlib import Path
 import numpy as np
 
 from .. import config
-from ..core import F64
-from ..core.features import FEATURE_NAMES, feature_index, features_from_normalized, valid_mask
-from ..core.session import Session, load_session
 from ..vision.model import sha256_file
 
 SUPPORTED_PYTHON = ((3, 11), (3, 13))
@@ -93,7 +89,7 @@ def check_camera(index: int) -> tuple[bool, str]:
     return True, f"camera {index}: {shape[1]}x{shape[0]} at {fps:.1f} fps (measured over {n})"
 
 
-def run_doctor(model_path: Path, camera_index: int | None) -> int:
+def run_doctor(model_path: Path, camera_index: int) -> int:
     checks: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
         ("python", check_python),
         ("platform", check_platform),
@@ -106,7 +102,7 @@ def run_doctor(model_path: Path, camera_index: int | None) -> int:
 
     if not failed:
         failed |= not _report("landmarker", lambda: check_landmarker(model_path))
-    if camera_index is not None and not failed:
+    if not failed:
         failed |= not _report("camera", lambda: check_camera(camera_index))
     print("\nAll checks passed." if not failed else "\nSome checks FAILED.")
     return 1 if failed else 0
@@ -119,68 +115,3 @@ def _report(name: str, fn: Callable[[], tuple[bool, str]]) -> bool:
         ok, detail = False, f"{type(exc).__name__}: {exc}"
     print(f"[{'ok' if ok else 'FAIL'}] {name}: {detail}")
     return ok
-
-
-_THRESHOLDS = (0.06, 0.08, 0.10, 0.12, 0.15, 0.18)
-_TABLE_COLUMNS = ("r_h", "l_h", "r_v_corner", "l_v_corner", "r_v_lid", "yaw", "pitch")
-
-
-def _nanmedian(x: F64) -> float:
-    finite = x[np.isfinite(x)]
-    return float(np.median(finite)) if finite.size else float("nan")
-
-
-def _percentiles(x: F64, qs: tuple[float, ...] = (1, 5, 25, 50, 75, 95)) -> str:
-    finite = x[np.isfinite(x)]
-    if not finite.size:
-        return "no data"
-    return "  ".join(f"p{int(q)}={np.percentile(finite, q):.3f}" for q in qs)
-
-
-def session_report(session: Session, window_s: float = 2.0) -> str:
-    feats = features_from_normalized(session.landmarks, session.image_size, session.transforms)
-    n = session.n_frames
-    lines = [f"frames: {n}   image: {session.image_size[0]}x{session.image_size[1]}"]
-    if n < 2:
-        return "\n".join([*lines, "too few frames"])
-    t = (session.timestamps_ns - session.timestamps_ns[0]) / 1e9
-    lines.append(f"duration: {t[-1]:.1f} s   face found: {100 * session.face_found.mean():.1f}%")
-
-    lines.append("\nvalid-frame share by openness threshold (blink threshold candidates):")
-    for thr in _THRESHOLDS:
-        lines.append(f"  >= {thr:.2f}: {100 * valid_mask(feats, thr).mean():.1f}%")
-    for name in ("r_open", "l_open"):
-        lines.append(f"{name}: {_percentiles(feats[:, feature_index(name)])}")
-
-    finite_tf = np.flatnonzero(np.isfinite(session.transforms[:, 0, 0]))
-    if finite_tf.size:
-        lines.append("\nraw facial transformation matrix (first frame with one):")
-        for row in session.transforms[int(finite_tf[0])]:
-            lines.append("  " + "  ".join(f"{v:9.4f}" for v in row))
-    else:
-        lines.append("\nno facial transformation matrices recorded")
-
-    lines.append("\nfeature ranges over the recording (min / median / max):")
-    for name in FEATURE_NAMES:
-        col = feats[:, feature_index(name)]
-        finite = col[np.isfinite(col)]
-        if finite.size:
-            lo, mid, hi = finite.min(), np.median(finite), finite.max()
-            lines.append(f"  {name:>11}: {lo:9.3f} {mid:9.3f} {hi:9.3f}")
-
-    lines.append(f"\nmedian per {window_s:g}s window (gaze-valid frames only):")
-    lines.append("  t(s)  " + "".join(f"{c:>12}" for c in _TABLE_COLUMNS))
-    ok = valid_mask(feats)
-    idx = {c: feature_index(c) for c in _TABLE_COLUMNS}
-    for start in np.arange(0.0, t[-1], window_s):
-        sel = ok & (t >= start) & (t < start + window_s)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            cells = "".join(f"{_nanmedian(feats[sel, idx[c]]):12.3f}" for c in _TABLE_COLUMNS)
-        lines.append(f"  {start:4.0f}  {cells}")
-    return "\n".join(lines)
-
-
-def run_inspect(path: Path, window_s: float) -> int:
-    print(session_report(load_session(path), window_s))
-    return 0

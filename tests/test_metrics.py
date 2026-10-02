@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from gazekey.core.metrics import (
-    RateMeter,
     axis_offsets_deg,
     chebyshev_deg,
     hit_rates,
@@ -89,26 +88,6 @@ def test_radial_sd_hand_value_and_degenerate() -> None:
     assert radial_sd_deg(TRUE_SCREEN, pts) == pytest.approx(a * math.sqrt(2.0), rel=1e-6)
     assert math.isnan(radial_sd_deg(TRUE_SCREEN, pts[:1]))
     assert radial_sd_deg(TRUE_SCREEN, [CENTRE, CENTRE, CENTRE]) == pytest.approx(0.0)
-
-
-def test_rate_converges_to_constant_fps() -> None:
-    meter = RateMeter(alpha=0.2)
-    assert meter.update(0) is None
-    rate = None
-    for i in range(1, 200):
-        rate = meter.update(i * 33_333_333)
-    assert rate == pytest.approx(30.0, rel=1e-3)
-
-
-def test_rate_ignores_non_increasing_timestamps() -> None:
-    meter = RateMeter()
-    meter.update(1_000_000_000)
-    first = meter.update(2_000_000_000)
-    assert first == pytest.approx(1.0)
-    assert meter.update(2_000_000_000) == first
-    assert meter.update(1_500_000_000) == first
-    with pytest.raises(ValueError):
-        RateMeter(alpha=0.0)
 
 
 def test_summarise_ms() -> None:

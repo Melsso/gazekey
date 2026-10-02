@@ -30,28 +30,32 @@ def format_summary(summary: Summary, indent: str = "  ") -> list[str]:
 
 def format_result(label: str, r: SessionResult) -> str:
     c = r.conditions
-    tags = (
-        f"participant={c.participant} head={c.head} glasses={'yes' if c.glasses else 'no'} "
-        f"light={c.light} min_since_cal={c.minutes_since_calibration:g}"
-    )
+    tags = f"participant={c.participant}" + (f"  note: {c.notes}" if c.notes else "")
     lines = [
         f"{label}",
         f"  {tags}",
-        f"  model={r.mapper_name} (alpha={r.fitted.alpha_:.3g}) features={r.feature_set}   "
+        f"  model={r.mapper_name} (alpha={r.fitted.alpha_:.3g}) features={r.feature_set} "
+        f"cal-points={r.calibration_points}   "
         f"calibration dots {r.n_cal_used}/{r.n_cal_total}, "
         f"validation dots {r.n_val_used}/{r.n_val_total}",
-        f"  calibration fit error (training dots): mean {r.cal_offsets_deg.mean():.2f}\u00b0",
         *format_summary(r.summary),
     ]
     return "\n".join(lines)
 
 
-def run_eval(files: Sequence[Path], mapper: str, feature_set: str) -> int:
+def run_eval(
+    files: Sequence[Path], mapper: str = "ridge", feature_set: str = "iris", calibration: int = 9
+) -> int:
     results: list[SessionResult] = []
     failed = False
     for path in files:
         try:
-            result = evaluate_session(load_session(path), mapper=mapper, feature_set=feature_set)
+            result = evaluate_session(
+                load_session(path),
+                mapper=mapper,
+                feature_set=feature_set,
+                calibration=calibration,
+            )
         except (EvaluationError, SessionFormatError, OSError, ValueError) as exc:
             print(f"{path}: error: {exc}", file=sys.stderr)
             failed = True
