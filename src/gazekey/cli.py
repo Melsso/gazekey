@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("track", help="live gaze dot over your screen (uses your latest calibration)")
+    sub.add_parser("type", help="hands-free on-screen keyboard (uses your latest calibration)")
 
     p = sub.add_parser("eval", help="re-score saved sessions offline and print metrics")
     p.add_argument(
@@ -79,6 +80,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             camera_index=None,
             landmarker_path=landmarker,
         )
+    if command == "type":
+        from .commands.keyboard import run_type
+
+        return run_type(landmarker_path=landmarker)
 
     from .commands.track import run_track
 

@@ -33,6 +33,8 @@ class Conditions:
     distance_cm: float | None = None
     minutes_since_calibration: float = 0.0
     notes: str = ""
+    origin_x_pt: int = 0
+    origin_y_pt: int = 0
 
     def __post_init__(self) -> None:
         if self.head not in _HEADS:
@@ -97,7 +99,6 @@ class Session:
         return np.flatnonzero(self.dot_roles == role)
 
     def frame_slice(self, t_start_ns: int, t_end_ns: int) -> slice:
-        """Frames with t_start_ns <= t < t_end_ns (timestamps are sorted)."""
         lo = int(np.searchsorted(self.timestamps_ns, t_start_ns, side="left"))
         hi = int(np.searchsorted(self.timestamps_ns, t_end_ns, side="left"))
         return slice(lo, hi)

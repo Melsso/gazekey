@@ -20,6 +20,10 @@ MODEL_SHA256: str | None = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2f
 IRIS_DIAMETER_MM = 11.7
 SESSIONS_DIR = Path("sessions")
 
+DWELL_S = 0.8
+GRACE_S = 0.15
+COOLDOWN_S = 0.5
+
 
 def default_camera_index(environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ

@@ -1,4 +1,5 @@
 import sys
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -39,7 +40,10 @@ def run_calibrate(
         print("calibration aborted; nothing saved.")
         return 1
 
-    session = run.session
+    session = replace(
+        run.session,
+        conditions=replace(conditions, origin_x_pt=run.origin_pt[0], origin_y_pt=run.origin_pt[1]),
+    )
     saved = save_session(session, default_output(participant))
     print(f"saved session (landmarks only, no video) to {saved}")
     try:

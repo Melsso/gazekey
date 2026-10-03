@@ -175,3 +175,10 @@ def test_extra_calibration_role_round_trips(tmp_path: Path) -> None:
     loaded = load_session(save_session(rec.build(), tmp_path / "s.npz"))
     assert loaded.dot_roles.tolist() == ["cal", "ext", "val"]
     assert loaded.dot_indices("ext").tolist() == [1]
+
+
+def test_window_origin_round_trips(tmp_path: Path) -> None:
+    rec = SessionRecorder(SIZE)
+    s = rec.build(conditions=Conditions(origin_x_pt=0, origin_y_pt=43))
+    loaded = load_session(save_session(s, tmp_path / "o.npz"))
+    assert (loaded.conditions.origin_x_pt, loaded.conditions.origin_y_pt) == (0, 43)

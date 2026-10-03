@@ -8,7 +8,6 @@ from ..core.tracking import build_tracker, calibration_error_deg
 
 
 def find_profile(directory: Path) -> tuple[Path, Session] | None:
-    """The newest session in `directory` that holds a usable calibration."""
     files = sorted(directory.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True)
     for path in files:
         try:
@@ -36,6 +35,7 @@ def run_track(
         )
         return 1
     path, session = found
+    origin = (session.conditions.origin_x_pt, session.conditions.origin_y_pt)
     print(
         f"using calibration {path} (assumes the same display and that you sit as you did then; "
         "recalibrate if the dot is off)"
@@ -56,7 +56,7 @@ def run_track(
             tracker=tracker,
             landmarker_path=landmarker_path,
             camera_index=camera_index,
-            origin_pt=(0, 0),
+            origin_pt=origin,
         )
     except (TrackingError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)

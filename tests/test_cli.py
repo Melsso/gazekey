@@ -30,11 +30,18 @@ def test_commands_and_flags_parse() -> None:
     assert parser.parse_args(["eval", "a.npz", "b.npz"]).files == [Path("a.npz"), Path("b.npz")]
     assert parser.parse_args(["doctor"]).command == "doctor"
     assert parser.parse_args(["track"]).command == "track"
+    assert parser.parse_args(["type"]).command == "type"
 
 
 def test_removed_commands_and_flags_are_gone() -> None:
     parser = build_parser()
-    for argv in (["preview"], ["inspect", "x.npz"], ["type"], ["study"], ["calibrate", "-n", "13"]):
+    for argv in (
+        ["preview"],
+        ["inspect", "x.npz"],
+        ["study"],
+        ["calibrate", "-n", "13"],
+        ["type", "-n", "9"],
+    ):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
 
